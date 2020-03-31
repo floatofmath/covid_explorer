@@ -1,13 +1,15 @@
 ---
 title: "covid"
 author: "Florian Klinglmueller"
-date: "5 März 2020"
+date: "`r format(Sys.Date(),'%Y-%m-%d')`"
 output: html_document
 editor_options: 
   chunk_output_type: console
 ---
 
+
 ```{r setup, include=FALSE}
+## Started this file March 5
 knitr::opts_chunk$set(echo = FALSE,message=FALSE,warning=FALSE,fig.width = 12,fig.height=8)
 library(tidyverse)
 library(magrittr)
