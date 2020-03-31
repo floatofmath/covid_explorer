@@ -1,0 +1,153 @@
+---
+title: "covid_regional"
+author: "Florian Klinglmueller"
+date: "3/28/2020"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE,message=FALSE,warning=FALSE,fig.width = 12,fig.height=8)
+library(tidyverse)
+library(magrittr)
+library(lubridate)
+library(ggmap)
+library(sf)
+library(raster)
+library(dplyr)
+library(spData)
+#library(spDataLarge)
+library(tmap)
+library(leaflet)
+
+
+```
+
+```{r helper functions,echo=F}
+
+filterEurope <- function(.data,...) filter(.data,Long > -10,Long <25,Lat >40,Lat<75)
+
+filterCore <- function(.data,...) {
+  filter(.data,codice_regione %in% c('Lombardia','Veneto','Emilia Romagna','Piemonte','Lazio','P.A. Trento','P.A. Bolzano')) 
+} 
+
+filterRecent <- function(.data,start = '2020-02-24',...) filter(.data,Date >= ymd(start))
+
+filterAffected <- function(.data,min=0) {
+  filter(.data,totale_casi > min) %>% 
+  group_by(codice_regione) %>% 
+  mutate(length=n()) %>% 
+  filter(length>1) %>% 
+  dplyr::select(-length) %>% 
+  ungroup
+  }
+
+filterLatest <- function(.data,lag=0) {
+  group_by(.data,codice_regione) %>% arrange(desc(Date)) %>% slice((1+lag):(1+lag)) %>% ungroup
+}
+
+# collapseCountry <- function(.data,Country,lat,lon,new_name=Country,...) {
+#   filter(.data,codice_regione==Country) %>% 
+#   group_by(Date) %>% summarise(`Province/State`=NA,
+#                                codice_regione=new_name,
+#                                Lat = -33.9,
+#                                Long = 151,
+#                                Confirmed = sum(Confirmed,na.rm=T),
+#                                Recovered= sum(Recovered,na.rm=T),
+#                                Deaths = sum(Deaths,na.rm=T)) %>% ungroup %>% {bind_rows(.,filter(.data,codice_regione!=Country))}}
+
+plot_italy <- function(.data,variable,...){
+  left_join(italy,.data,by=c(COD_REG='codice_regione')) %>% 
+  {tm_shape(.) + tm_polygons(col=variable,...)+
+      tm_layout(legend.position=c('left','bottom'))}
+}
+
+
+adt <- function(.rnk,.confirmed,period=5){
+  ifelse(.rnk>period,period/log2(.confirmed/lag(.confirmed,period)),NA)
+}
+
+shift_country <- function(.data,country,days){
+  .data %>% filter(codice_regione==country) %>% mutate(Date = Date - days) -> .replace
+  .data[.data$codice_regione==country,] <- .replace
+  .data#ifelse(codice_regione == country,Date - days,Date))
+}
+
+synchronize_country <- function(.data,country,cut=50){
+  first <- .data %>% group_by(codice_regione) %>% filter(Confirmed > 50) %>% summarize(first = min(doy))
+  fc <- filter(first,codice_regione==country)$first
+  first <- mutate(first,first=first - fc)
+  for(i in 1:nrow(first)){
+    .data <- shift_country(.data,first$codice_regione[i],first$`first`[i])
+  }
+  return(.data)
+}
+
+```
+
+
+
+## Set up models to estimate pandemic spread from regional data 
+
+We start with data from Italy. Italy provides detailed data (down to the region) of disease spread. 
+
+```{r data processing}
+ita_province <- read_csv("data/COVID-19/dati-province/dpc-covid19-ita-province.csv", 
+    col_types = cols(data = col_datetime(format = "%Y-%m-%dT%H:%M:%S")))
+ita_regioni <- read_csv("data/COVID-19/dati-regioni/dpc-covid19-ita-regioni.csv", 
+    col_types = cols(data = col_datetime(format = "%Y-%m-%dT%H:%M:%S")))
+ita_regioni %<>% rename(Date = data)
+ita_regioni %<>% mutate(codice_regione = as.numeric(codice_regione))
+```
+
+```{r prepare maps}
+italy <- st_read("data/Limiti01012020_g/Reg01012020_g/Reg01012020_g_WGS84.shp")
+pal_fun <- colorQuantile("YlOrRd", NULL, n = 5)
+labeller <- function(region,number) paste0(region,": ",number)
+
+ita_regioni %>% filterLatest %>% left_join(italy_proj,.,by=c('COD_REG'='codice_regione')) %>% 
+  leaflet %>% 
+  addPolygons(stroke = F, # remove polygon borders
+              fillColor = ~pal_fun(deceduti), # set fill color with function from above and value
+              fillOpacity = 0.8, smoothFactor = 0.5,
+              label = ~labeller(denominazione_regione,deceduti)) # make it nicer) 
+
+
+ita_regioni %>% filterLatest %>% left_join(italy_proj,.,by=c('COD_REG'='codice_regione')) %>% 
+  leaflet %>% 
+  addPolygons(stroke = F, # remove polygon borders
+              fillColor = ~pal_fun(terapia_intensiva), # set fill color with function from above and value
+              fillOpacity = 0.8, smoothFactor = 0.5,
+              label = ~labeller(denominazione_regione,terapia_intensiva)) # make it nicer) 
+
+italy_proj <- st_transform(italy,4326)
+leaflet(italy_proj) %>% addPolygons()
+
+
+```
+
+
+## Time series plots
+
+
+```{r core plots, echo=FALSE}
+ita_regioni %>% group_by(denominazione_regione) %>% 
+  ggplot(aes(data,totale_casi)) + geom_path(aes(col=denominazione_regione))
+
+ita_regioni %>% group_by(denominazione_regione) %>% 
+  ggplot(aes(data,totale_casi)) + geom_path(aes(col=denominazione_regione))
+
+ita_regioni %>% group_by(denominazione_regione) %>% 
+  ggplot(aes(data,terapia_intensiva)) + geom_path(aes(col=denominazione_regione))
+
+ita_regioni %>% group_by(denominazione_regione) %>% 
+  ggplot(aes(data,deceduti)) + geom_path(aes(col=denominazione_regione)) + scale_y_log10() + theme_bw()
+
+ita_regioni %<>% mutate(data = as.Date(data))
+ita_regioni %<>% mutate(codice_regione = as.numeric(codice_regione))
+
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
