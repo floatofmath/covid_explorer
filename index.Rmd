@@ -10,6 +10,8 @@ editor_options:
 
 ```{r setup, include=FALSE}
 ## Started this file March 5
+#devtools::install_github('rensa/ggflags')
+
 knitr::opts_chunk$set(echo = FALSE,message=FALSE,warning=FALSE,fig.width = 12,fig.height=8)
 library(tidyverse)
 library(magrittr)
@@ -21,7 +23,7 @@ library(dplyr)
 library(spData)
 #library(spDataLarge)
 library(tmap)
-
+library(ggflags)
 
 ```
 
@@ -129,6 +131,17 @@ days_since <- function(.data,cut,variable){
     mutate(days_since = doy - min(doy)) %>% ungroup()
 }
 
+country_lines <- function(.data,what,index = Date){
+  index_ <- enquo(index)
+  what_ <- enquo(what)
+  ggplot(aes(!!index_,!!what_,group=`Country/Region`),data=.data) + geom_path(aes(col=`Country/Region`)) +
+  geom_flag(aes(x=!!index_,y=!!what_,country=str_to_lower(iso_a2),hjust=0.5,vjust = 0),data=filterLatest(.data)) + theme_minimal()
+}
+
+# data_long %>% filterCore() %>% 
+#   filterRecent() %>% country_lines(ADTD) + ylab('Average doubling time deaths')
+
+
 ```
 
 
@@ -171,14 +184,16 @@ data_long %<>% mutate(mlCFR = ifelse(Deaths+Recovered>0,Deaths/(Deaths+Recovered
 data_long %<>% group_by(`Province/State`,`Country/Region`) %>% arrange(Date) %>% 
   mutate(Infections = c(NA,diff(Confirmed)),
          Rate = ifelse(lead(Confirmed>0)&Confirmed>0,lead(Confirmed)/Confirmed,NA),
+         Active = pmax(0,Confirmed - Deaths - Recovered),
          rnk = cumsum((Confirmed>0)),
-         rnkd = cumsum((Deaths)),
+         rnkd = cumsum((Deaths>0)),
+         rnkl = cumsum((Active>0)),
          #ADT = ifelse(Confirmed>0,rnk/log2(pmax(2,Confirmed)/ifelse(rnk==1,Confirmed,1)),Inf),
          ADT = adt(rnk,Confirmed,7),
          ADTD = adt(rnkd,Deaths,5),
+         ADTL = adt(rnkl,Active,5),
          DDeaths = c(diff(Deaths),NA),
-         doy = as.numeric(Date - ymd('2020-01-01')),
-         Active = pmax(0,Confirmed - Deaths - Recovered)) %>% ungroup
+         doy = as.numeric(Date - ymd('2020-01-01'))) %>% ungroup
 
 
 
@@ -206,7 +221,7 @@ world %<>% mutate(pop = ifelse(name_long == 'France',67064000,pop)) %>%
 europe <- world %>% filter(continent == 'Europe')
 eu_bb <- st_bbox(c(xmin=-10,xmax=40.1,ymin=30,ymax=80.6))
 
-data_long %<>% left_join(dplyr::select(world,name_long,pop,continent),by=c('Country/Region'= 'name_long')) 
+data_long %<>% left_join(dplyr::select(world,name_long,pop,continent,iso_a2),by=c('Country/Region'= 'name_long')) 
 
 data_long %<>%  mutate(pRate = 1e5*Confirmed/pop)
 
@@ -231,19 +246,18 @@ data_long %>% group_by(Date,continent) %>%
 
 
 data_long %>% filterCore() %>% 
-  filterRecent() %>% filter(Confirmed > 50) %>% 
-  {
-  ggplot(aes(Date,ADT,group=`Country/Region`),data=.) + geom_path(aes(col=`Country/Region`)) +
-  geom_text(aes(Date,ADT,label=`Country/Region`,hjust=0.5,vjust = 0),data=filterLatest(.)) + theme_minimal()
-    }
-
+  filterRecent() %>% filter(Confirmed > 50) %>% country_lines(ADT)+ylab('Average doubling time cases')
 
 data_long %>% filterCore() %>% 
-  filterRecent() %>% filter(Deaths > 20) %>% 
-  {
-  ggplot(aes(Date,ADTD,group=`Country/Region`),data=.) + geom_path(aes(col=`Country/Region`)) +
-  geom_text(aes(Date,ADTD,label=`Country/Region`,hjust=0.5,vjust = 0),data=filterLatest(.)) + theme_minimal()
-    }
+  filterRecent() %>% country_lines(ADTD) + ylab('Average doubling time deaths')
+
+data_long %>% filterCore() %>% 
+  filterRecent() %>% country_lines(ADTL) + ylab('Average doubling time active cases')
+
+data_long %>% filterCore() %>% filterRecent() %>% 
+  ggplot(aes(Date,Active)) + geom_col() + facet_wrap(~`Country/Region`,scales='free_y',nrow=2) + theme_minimal()
+
+
 ```
 
 ## Synchronized curves
@@ -258,46 +272,30 @@ data_long %>% filterCore() %>% days_since(50,Confirmed) %>%
   geom_path(aes(col=`Country/Region`)) +
       geom_segment(aes(x=0,xend=x,y=50,yend=y),lty=2,size=.1,data=anno) +
       geom_text(aes(x = x, y=y, label = label),data=anno,size=2) +
-  geom_text(aes(days_since,Confirmed,label=`Country/Region`,hjust=0),data=filterLatest(.)) + 
+  geom_flag(aes(days_since,Confirmed,country=str_to_lower(iso_a2),hjust=0),data=filterLatest(.)) + 
   scale_y_log10(label=scales::comma) +#+
   theme_minimal() + xlab('Days since 50 cases') + ylab('Confirmed cases') 
 }
 
 
 data_long %>% filter(`Country/Region` %in% c('Italy','Austria','Sweden','United Kingdom','Switzerland','Germany')) %>% 
-  filterRecent() %>% filter(Confirmed > 50) %>% synchronize_confirmed('Italy',cut=20) %>% 
-  {
-  ggplot(aes(Date,ADT,group=`Country/Region`),data=.) + #geom_path(aes(col=`Country/Region`)) +
-      geom_smooth(aes(col=`Country/Region`,fill=`Country/Region`,span=10),alpha=.1) +
-  geom_text(aes(Date,ADT,label=`Country/Region`,hjust=0.5,vjust = 0),data=filterLatest(.)) + theme_minimal() + xlab('Days since 50 confirmed cases') + ylab('Average doubling time of cases')
-    }
+  filterRecent() %>% filter(Confirmed > 20) %>% days_since(20,Confirmed) %>% country_lines(ADT) + xlab('Days since 20 confirmed cases') + ylab('Average doubling time of cases')
+  # {
+  # ggplot(aes(Date,ADT,group=`Country/Region`),data=.) + #geom_path(aes(col=`Country/Region`)) +
+  #     geom_smooth(aes(col=`Country/Region`,fill=`Country/Region`,span=5),alpha=.1) +
+  # geom_flag(aes(Date,ADT,country=str_to_lower(iso_a2),hjust=0.5,vjust = 0),data=filterLatest(.)) + theme_minimal() + xlab('Days since 50 confirmed cases') 
+  #   }
 
 data_long %>% filter(`Country/Region` %in% c('Italy','Austria','Sweden','United Kingdom','Germany','Switzerland')) %>% 
-  filterRecent() %>% filter(Deaths > 10) %>% days_since(cut=20,Deaths) %>% arrange(Date) %>% 
-  {
-  ggplot(aes(days_since,Deaths,group=`Country/Region`),data=.) + #geom_path(aes(col=`Country/Region`)) +
-      geom_smooth(aes(col=`Country/Region`,fill=`Country/Region`),span=10,alpha=.1) +
-  geom_text(aes(days_since,Deaths,label=`Country/Region`,hjust=0.5,vjust = 0),data=filterLatest(.))  + 
-      scale_y_log10(label=scales::comma) + 
+  filterRecent() %>% filter(Deaths > 10) %>% days_since(cut=20,Deaths) %>% 
+  country_lines(Deaths,days_since) + scale_y_log10(label=scales::comma) + 
       theme_minimal() + xlab('Days since 20 Deaths') + ylab('Deceased')
-    }
 
 
 data_long %>% filter(`Country/Region` %in% c('Italy','Austria','Sweden','United Kingdom','Germany','Switzerland')) %>% 
   filterRecent() %>% filter(Confirmed > 50) %>% days_since(20,Deaths) %>% 
-  {
-  ggplot(aes(days_since,ADTD,group=`Country/Region`),data=.) + #geom_path(aes(col=`Country/Region`)) +
-      geom_smooth(aes(col=`Country/Region`,fill=`Country/Region`),span=10,alpha=.1) +
-  geom_text(aes(days_since,ADTD,label=`Country/Region`,hjust=0.5,vjust = 0),data=filterLatest(.)) + theme_minimal() + xlab('Days since 20 Deaths') + ylab('Average doubling time of deaths')
-    }
+  country_lines(ADTD,days_since) + theme_minimal() + xlab('Days since 20 Deaths') + ylab('Average doubling time of deaths')
 
-data_long %>% filter(`Country/Region` %in% c('Italy','Austria','Sweden','United Kingdom','Germany','Switzerland')) %>% 
-  filterRecent() %>% filter(Confirmed > 50) %>% days_since(20,Deaths) %>% 
-  {
-  ggplot(aes(days_since,Rate,group=`Country/Region`),data=.) + 
-      geom_path(aes(col=`Country/Region`)) +
-  geom_text(aes(days_since,Rate,label=`Country/Region`,hjust=0.5,vjust = 0),data=filterLatest(.)) + theme_minimal() + xlab('Days since 20 Deaths') + ylab('Daily relative increase')
-    }
 
 
 ```
