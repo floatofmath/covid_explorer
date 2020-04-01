@@ -1,0 +1,472 @@
+---
+title: "covid"
+author: "Florian Klinglmueller"
+date: "`r format(Sys.Date(),'%Y-%m-%d')`"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+
+```{r setup, include=FALSE}
+## Started this file March 5
+knitr::opts_chunk$set(echo = FALSE,message=FALSE,warning=FALSE,fig.width = 12,fig.height=8)
+library(tidyverse)
+library(magrittr)
+library(lubridate)
+library(ggmap)
+library(sf)
+library(raster)
+library(dplyr)
+library(spData)
+#library(spDataLarge)
+library(tmap)
+
+
+```
+
+## Data Import
+
+
+```{r cars, include = FALSE}
+if(dir.exists('./data/CSSE_COVID-19/')){#I locally clone the CSSE repository; if that's not available fetch the full files
+csse_confirmed <- read_csv('data/CSSE_COVID-19/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_confirmed_global.csv')#Stuff/covid/data/time_series_19-covid-Confirmed.csv")
+csse_deaths <- read_csv('data/CSSE_COVID-19/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_deaths_global.csv')
+csse_recovered <- read_csv('data/CSSE_COVID-19/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_recovered_global.csv')
+} else {
+read_csv(url("https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_confirmed_global.csv"))#~/Projekte/Science 
+read_csv(url("https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_deaths_global.csv"))#~/Projekte/Science Stuff/covid/data/time_series_19-covid-Deaths.csv")
+read_csv(url("https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_recovered_global.csv"))#~/Projekte/Science Stuff/covid/data/time_series_19-covid-Recovered.csv")
+}
+```
+
+## Pre-processing
+
+I import the data from the Coronavirus COVID-19 Global Cases by Johns Hopkins CSSE Dashboard which provides raw-data at https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/. Data are updated daily, but may not be as recent as depicted on the online dashboard. 
+
+I perform a little bit of pre-processing. Mainly I collapse data for the US and China. These data are provided on the provincial level, which makes it difficult to visualise using mapping software. Having these data on the country level lets me easily use different mapping tools that provide mapping data on the country level. 
+
+
+```{r helper functions,echo=F}
+## A ton of helper functions
+filterEurope <- function(.data,...) filter(.data,Long > -10,Long <25,Lat >40,Lat<75)
+
+filterCore <- function(.data,...) {
+  filter(.data,`Country/Region` %in% c('Austria','Italy','Germany','France','Spain','United Kingdom','Switzerland','United States')) 
+  } 
+
+filterRecent <- function(.data,start = '2020-02-24',...) filter(.data,Date >= ymd(start))
+
+filterAffected <- function(.data,...) {
+  filter(.data,Confirmed > 0) %>% 
+  group_by(`Country/Region`) %>% 
+  mutate(length=n()) %>% 
+  filter(length>1) %>% 
+  dplyr::select(-length) %>% 
+  ungroup
+  }
+
+filterLatest <- function(.data,lag=0) {
+  group_by(.data,`Country/Region`,`Province/State`) %>% arrange(desc(Date)) %>% slice((1+lag):(1+lag))
+}
+
+removeChina <- function(.data,...) filter(.data,!str_detect(`Country/Region`,'China'))
+
+collapseCountry <- function(.data,Country,lat,lon,new_name=Country,...) {
+  filter(.data,`Country/Region`==Country) %>% 
+  group_by(Date) %>% summarise(`Province/State`=NA,
+                               `Country/Region`=new_name,
+                               Lat = -33.9,
+                               Long = 151,
+                               Confirmed = sum(Confirmed,na.rm=T),
+                               Recovered= sum(Recovered,na.rm=T),
+                               Deaths = sum(Deaths,na.rm=T)) %>% ungroup %>% {bind_rows(.,filter(.data,`Country/Region`!=Country))}}
+
+plot_world <- function(.data,variable,...){
+  left_join(world,.data,by=c(name_long='Country/Region')) %>% 
+  {tm_shape(.) + tm_polygons(col=variable,...)+
+      tm_layout(legend.position=c('left','bottom'))}
+}
+
+plot_europe <- function(.data,variable,...){
+  left_join(europe,.data,by=c(name_long='Country/Region')) %>% 
+    {tm_shape(.,bbox = eu_bb) +tm_polygons(col=variable,...) + tm_layout(legend.position=c('left','top'))}
+}
+
+adt <- function(.rnk,.confirmed,period=5){
+  ifelse(.rnk>period,period/log2(.confirmed/lag(.confirmed,period)),NA)
+}
+
+shift_country <- function(.data,country,days){
+  .data %>% filter(`Country/Region`==country) %>% mutate(Date = Date - days) -> .replace
+  .data[.data$`Country/Region`==country,] <- .replace
+  .data#ifelse(`Country/Region` == country,Date - days,Date))
+}
+
+synchronize_confirmed <- function(.data,country,cut=50){
+  first <- .data %>% group_by(`Country/Region`) %>% filter(Confirmed > cut) %>% summarize(first = min(doy))
+  fc <- filter(first,`Country/Region`==country)$first
+  first <- mutate(first,first=first - fc)
+  for(i in 1:nrow(first)){
+    .data <- shift_country(.data,first$`Country/Region`[i],first$`first`[i])
+  }
+  return(.data)
+}
+
+synchronize_deaths <- function(.data,country,cut=10){
+  first <- .data %>% group_by(`Country/Region`) %>% filter(Deaths > cut) %>% summarize(first = min(doy))
+  fc <- filter(first,`Country/Region`==country)$first
+  first <- mutate(first,first=first - fc)
+  for(i in 1:nrow(first)){
+    .data <- shift_country(.data,first$`Country/Region`[i],first$`first`[i])
+  }
+  return(.data)
+}
+
+days_since <- function(.data,cut,variable){
+  .variable <- enquo(variable)
+  .data %>% group_by(`Country/Region`) %>% filter(!!.variable>=cut) %>% 
+    mutate(days_since = doy - min(doy)) %>% ungroup()
+}
+
+```
+
+
+```{r preprocessing, echo=FALSE}
+## make long
+csse_confirmed %>% gather(Date,-(1:4),value = 'Confirmed') %>% mutate(Date = mdy(Date)) -> confirmed_long
+csse_deaths %>% gather(Date,-(1:4),value = 'Deaths') %>% mutate(Date = mdy(Date)) -> deaths_long
+csse_recovered %>% gather(Date,-(1:4),value = 'Recovered') %>% mutate(Date = mdy(Date)) -> recovered_long
+
+
+## rename 
+data_long <- left_join(left_join(confirmed_long,deaths_long),recovered_long)
+## impute potentially missing values
+data_long %<>% group_by(`Country/Region`,`Province/State`) %>%  arrange(Date) %>% tidyr::fill(Confirmed,Deaths,Recovered,.direction = 'down') %>% ungroup()
+
+data_long %<>% mutate(`Country/Region` = str_replace(`Country/Region`,'^UK$','United Kingdom'))
+data_long %<>% mutate(`Country/Region` = str_replace(`Country/Region`,'Czechia','Czech Republic'))
+data_long %<>% mutate(`Country/Region` = str_replace(`Country/Region`,'North Macedonia','Macedonia'))
+data_long %<>% mutate(`Country/Region` = str_replace(`Country/Region`,'North Macedonia','Macedonia'))
+data_long %<>% mutate(`Country/Region` = str_replace(`Country/Region`,'Korea, South','Republic of Korea'))
+data_long %<>% mutate(`Country/Region` = str_replace(`Country/Region`,'Russia','Russian Federation'))
+
+
+
+
+
+data_long %<>% 
+  collapseCountry('China',40.2,116) %>% 
+  collapseCountry('US',38.9,-71.4,'United States') %>% 
+  collapseCountry('Australia',-33.9,151) %>% 
+  collapseCountry('France',46.2,2.21) %>% 
+  collapseCountry('Canada',52.9,-73.5) %>% 
+  collapseCountry('United Kingdom',55.4,-3.44)
+
+
+## Estimators
+data_long %<>% mutate(mlCFR = ifelse(Deaths+Recovered>0,Deaths/(Deaths+Recovered),NA),
+                      naiveCFR = ifelse(Deaths>0,Deaths/Confirmed,NA))
+
+data_long %<>% group_by(`Province/State`,`Country/Region`) %>% arrange(Date) %>% 
+  mutate(Infections = c(NA,diff(Confirmed)),
+         Rate = ifelse(lead(Confirmed>0)&Confirmed>0,lead(Confirmed)/Confirmed,NA),
+         rnk = cumsum((Confirmed>0)),
+         rnkd = cumsum((Deaths)),
+         #ADT = ifelse(Confirmed>0,rnk/log2(pmax(2,Confirmed)/ifelse(rnk==1,Confirmed,1)),Inf),
+         ADT = adt(rnk,Confirmed,7),
+         ADTD = adt(rnkd,Deaths,5),
+         DDeaths = c(diff(Deaths),NA),
+         doy = as.numeric(Date - ymd('2020-01-01')),
+         Active = pmax(0,Confirmed - Deaths - Recovered)) %>% ungroup
+
+
+
+```
+
+In terms of statistics I present absolute figures for confirmed cases, deaths, and recovered. I also compute relative figures in terms of cases per 100 000 population. These use population numbers as provided in spData package. Interestingly this population numbers are not available for all countries in this package. For some of the missing countries (Norway, France, ...) I have entered numbers as found on wikipedia. This is probably not entirely accurate, as they may not be from comparable census times, but who cares at this moment.
+
+Matching country names between disease data and mapping data is not complete. Some countries report numbers for different regions (Canada,US,China,...). I have colapsed numbers from those countries. Other countries e.g. Northern Macedonia have different names between datasets. For some of the affected countries I have attempted to unify names, others I may have missed (esp. Africa is a big place).
+
+I do estimate a couple of statistics. First I estimate the average doubling time, I use a period of 7 days (i.e. $adt_t = \frac{7}{log_2(x_t - x_{t-7}}$) this is purely heuristic, but it appears to provide a good balance between variability and responsiveness to policy changes (as I have gauged from looking at Italy). 
+
+I do estimate infection rates by I modelling the logarithm of confirmed cases using a fixed effect for country and the interaction between date and country. That provides an estimate of the 'start' of the epidemic (via country-wise intercept) and infection rate per country. However, the latter would require that countries follow an exponential curve. We should hope this assumption does no longer hold for those countries that have implemented measures. [Currently these data are not shown]
+
+I do estimate the case fatality rate using a simple estimator that is recommended here and here - TODO add links to papers. This basically divides the number of fatalities by the number of resolved cases, which implies the assumption that unresolved cases will recover or die at the same rate as resolved cases. o
+
+Finally, a big caveat is that we can only see figures for subjects that were tested positive. Different testing capacities and approaches therefore can have a large influence on the numbers. To adress this issue I now show a couple of plots for rates and average doubling times of deaths. I would suppose that deaths are detected more precisely, but there are issues with testing deceased as well. 
+
+```{r map preparations}
+mapEurope <- borders('world',xlim=c(-10,25),ylim=c(40,75),colour='gray90',fill='gray50')
+mapWorld <- borders('world',colour='gray90',fill='gray50')
+#mapEurope <- get_map(location=c(-10,30,50,75),zoom=4,source='stamen')
+world %<>% mutate(pop = ifelse(name_long == 'France',67064000,pop)) %>% 
+           mutate(pop = ifelse(name_long == 'Norway',5367580,pop)) %>% 
+           mutate(pop = ifelse(name_long == 'Singapore',5638700,pop))
+europe <- world %>% filter(continent == 'Europe')
+eu_bb <- st_bbox(c(xmin=-10,xmax=40.1,ymin=30,ymax=80.6))
+
+data_long %<>% left_join(dplyr::select(world,name_long,pop,continent),by=c('Country/Region'= 'name_long')) 
+
+data_long %<>%  mutate(pRate = 1e5*Confirmed/pop)
+
+
+
+
+
+```
+
+```{r core plots}
+data_long %>% group_by(Date) %>% summarise(Active = sum(Active,na.rm=T),Deaths = sum(Deaths,na.rm=T),Recovered=sum(Recovered,na.rm=T)) %>% 
+  gather(Status,Cases,-Date) %>% 
+  mutate(Status = ordered(Status,levels=c('Active','Recovered','Deaths'))) %>% 
+  ggplot(aes(Date,Cases,group=Status))+geom_col(aes(fill=Status))+theme_minimal() + scale_y_continuous(labels=scales::comma)
+
+data_long %>% group_by(Date,continent) %>% 
+  summarise(Active = sum(Active,na.rm=T),Deaths = sum(Deaths,na.rm=T),Recovered=sum(Recovered,na.rm=T)) %>%
+  filter(!is.na(continent)) %>% 
+  gather(Status,Cases,-Date,-continent) %>%
+  mutate(Status = ordered(Status,levels=c('Active','Recovered','Deaths'))) %>%
+  ggplot(aes(Date,Cases))+geom_col(aes(fill=Status))+theme_minimal()+facet_wrap(~continent,scales='free_y') + scale_y_continuous(labels=scales::comma)
+
+
+data_long %>% filterCore() %>% 
+  filterRecent() %>% filter(Confirmed > 50) %>% 
+  {
+  ggplot(aes(Date,ADT,group=`Country/Region`),data=.) + geom_path(aes(col=`Country/Region`)) +
+  geom_text(aes(Date,ADT,label=`Country/Region`,hjust=0.5,vjust = 0),data=filterLatest(.)) + theme_minimal()
+    }
+
+
+data_long %>% filterCore() %>% 
+  filterRecent() %>% filter(Deaths > 20) %>% 
+  {
+  ggplot(aes(Date,ADTD,group=`Country/Region`),data=.) + geom_path(aes(col=`Country/Region`)) +
+  geom_text(aes(Date,ADTD,label=`Country/Region`,hjust=0.5,vjust = 0),data=filterLatest(.)) + theme_minimal()
+    }
+```
+
+## Synchronized curves
+
+
+```{r core plots 2}
+anno <- tibble(x=c(20,38,39,40),y=2^c(20,19,13,10),label=c('Doubles every day','Doubles every 2 days','Doubles every 3 days','Doubles every 4 days'))
+data_long %>% filterCore() %>% days_since(50,Confirmed) %>% 
+  group_by(`Country/Region`) %>% 
+  {
+  ggplot(aes(days_since,Confirmed),data=.) + 
+  geom_path(aes(col=`Country/Region`)) +
+      geom_segment(aes(x=0,xend=x,y=50,yend=y),lty=2,size=.1,data=anno) +
+      geom_text(aes(x = x, y=y, label = label),data=anno,size=2) +
+  geom_text(aes(days_since,Confirmed,label=`Country/Region`,hjust=0),data=filterLatest(.)) + 
+  scale_y_log10(label=scales::comma) +#+
+  theme_minimal() + xlab('Days since 50 cases') + ylab('Confirmed cases') 
+}
+
+
+data_long %>% filter(`Country/Region` %in% c('Italy','Austria','Sweden','United Kingdom','Switzerland','Germany')) %>% 
+  filterRecent() %>% filter(Confirmed > 50) %>% synchronize_confirmed('Italy',cut=20) %>% 
+  {
+  ggplot(aes(Date,ADT,group=`Country/Region`),data=.) + #geom_path(aes(col=`Country/Region`)) +
+      geom_smooth(aes(col=`Country/Region`,fill=`Country/Region`,span=10),alpha=.1) +
+  geom_text(aes(Date,ADT,label=`Country/Region`,hjust=0.5,vjust = 0),data=filterLatest(.)) + theme_minimal() + xlab('Days since 50 confirmed cases') + ylab('Average doubling time of cases')
+    }
+
+data_long %>% filter(`Country/Region` %in% c('Italy','Austria','Sweden','United Kingdom','Germany','Switzerland')) %>% 
+  filterRecent() %>% filter(Deaths > 10) %>% days_since(cut=20,Deaths) %>% arrange(Date) %>% 
+  {
+  ggplot(aes(days_since,Deaths,group=`Country/Region`),data=.) + #geom_path(aes(col=`Country/Region`)) +
+      geom_smooth(aes(col=`Country/Region`,fill=`Country/Region`),span=10,alpha=.1) +
+  geom_text(aes(days_since,Deaths,label=`Country/Region`,hjust=0.5,vjust = 0),data=filterLatest(.))  + 
+      scale_y_log10(label=scales::comma) + 
+      theme_minimal() + xlab('Days since 20 Deaths') + ylab('Deceased')
+    }
+
+
+data_long %>% filter(`Country/Region` %in% c('Italy','Austria','Sweden','United Kingdom','Germany','Switzerland')) %>% 
+  filterRecent() %>% filter(Confirmed > 50) %>% days_since(20,Deaths) %>% 
+  {
+  ggplot(aes(days_since,ADTD,group=`Country/Region`),data=.) + #geom_path(aes(col=`Country/Region`)) +
+      geom_smooth(aes(col=`Country/Region`,fill=`Country/Region`),span=10,alpha=.1) +
+  geom_text(aes(days_since,ADTD,label=`Country/Region`,hjust=0.5,vjust = 0),data=filterLatest(.)) + theme_minimal() + xlab('Days since 20 Deaths') + ylab('Average doubling time of deaths')
+    }
+
+data_long %>% filter(`Country/Region` %in% c('Italy','Austria','Sweden','United Kingdom','Germany','Switzerland')) %>% 
+  filterRecent() %>% filter(Confirmed > 50) %>% days_since(20,Deaths) %>% 
+  {
+  ggplot(aes(days_since,Rate,group=`Country/Region`),data=.) + 
+      geom_path(aes(col=`Country/Region`)) +
+  geom_text(aes(days_since,Rate,label=`Country/Region`,hjust=0.5,vjust = 0),data=filterLatest(.)) + theme_minimal() + xlab('Days since 20 Deaths') + ylab('Daily relative increase')
+    }
+
+
+```
+
+
+
+
+```{r pressure, eval=F, echo=FALSE, warning=FALSE}
+
+data_long %>% group_by(Date,`Country/Region`) %>% filterCore() %>% filterRecent(start='2020-03-01') %>%   ggplot(aes(Date,ADT,group=`Country/Region`)) + geom_point(aes(shape=`Country/Region`))+geom_path(lty=3)+theme_minimal()
+
+
+data_long %>% group_by(Date) %>% summarise(CFR=sum(Deaths)/(sum(Deaths)+sum(Recovered))) %>% 
+  ggplot(aes(Date,CFR)) + geom_smooth() + theme_bw()
+
+data_long %>% group_by(Date) %>% filterEurope() %>% summarise(CFR=sum(Deaths)/(sum(Deaths)+sum(Recovered))) %>% 
+  ggplot(aes(Date,CFR)) + geom_smooth() + theme_minimal()
+
+data_long %>% group_by(`Country/Region`,`Province/State`) %>% arrange(desc(Date)) %>% slice(1) %>% 
+  filterEurope %>% 
+  ggplot(aes(x=Long,y=Lat))+mapEurope+geom_polygon(aes(size=Confirmed),colour='red',alpha=.2)+
+  geom_point(aes(x=Long+1,size=Deaths),col='black')
+
+confirmed_long %>% group_by(`Country/Region`,`Province/State`) %>% arrange(desc(Date)) %>% slice(1) %>% 
+  ggplot(aes(x=Long,y=Lat))+mapWorld+geom_point(aes(size=sqrt(Confirmed)),fill='green',alpha=.7) +theme_minimal()
+
+
+#left_join(world_data,data_long,by=c(region='Country/Region')) %>% ggplot(aes(long,lat))+geom_polygon(aes(fill=Confirmed)) + scale_fill_gradient2("Cases", low = "white", mid = "yellow", high = "red", midpoint = 500)
+
+## Diffferentials
+data_long %>% 
+  filterCore %>% ggplot(aes(x=Date,y=log(Confirmed),group=`Country/Region`))+geom_path(aes(col =`Country/Region`))
+
+data_long %>% 
+  filterCore %>% filterRecent %>% ggplot(aes(x=Date,y=Rate))+geom_path(aes(col =`Country/Region`)) + geom_smooth(method='gam') + facet_wrap(~`Country/Region`)+ylim(0,3)
+
+data_long %>% 
+  filter(`Country/Region` %in% c('Germany','Italy','France','United Kingdom','South Korea')|`Province/State`=='Hubei') %>% filterRecent('2020-01-01') %>% ggplot(aes(x=Date,y=naiveCFR))+geom_path(aes(col =`Country/Region`)) + geom_smooth(method='gam') + facet_wrap(~`Country/Region`+`Province/State`)+ylim(0,1)+theme_minimal()
+
+data_long %>% 
+  filter(`Country/Region` %in% c('Germany','Italy','France','United Kingdom','South Korea')|`Province/State`=='Hubei') %>% filterRecent('2020-01-01') %>% ggplot(aes(x=Date,y=ADT))+geom_path(aes(col =`Country/Region`)) + geom_smooth(method='gam') + facet_wrap(~`Country/Region`+`Province/State`)+ylim(0,10)+theme_minimal()
+
+data_long %>% filter(`Country/Region` %in% c('Republic of Korea','Japan','Austria','Germany','Sweden','Italy','United States')) %>% 
+  { ggplot(aes(Date,Active),data=.) + geom_path(aes(col=`Country/Region`)) + 
+#    scale_y_log10() + 
+    geom_text(aes(Date,Active,label=`Country/Region`),data=filterLatest(.),hjust=0) +
+      theme_minimal()} 
+
+data_long %>% filterRecent('2020-03-01') %>% filter(`Country/Region` %in% c('Republic of Korea','Japan','Austria','Germany','Sweden','Italy','United States')) %>% 
+  { ggplot(aes(Date,ADT),data=.) + geom_path(aes(col=`Country/Region`)) + 
+#    scale_y_log10() + 
+    geom_text(aes(Date,ADT,label=`Country/Region`),data=filterLatest(.),hjust=0) +
+      theme_minimal()} 
+
+data_long %>% filterEurope() %>% filterLatest %>% 
+  ggplot(aes(reorder(`Country/Region`,-Confirmed),Confirmed))+
+  geom_col() +theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+data_long %>% filterLatest %>% removeChina %>% 
+  ggplot(aes(reorder(`Country/Region`,-Confirmed),Confirmed))+
+  geom_col() +theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+data_long %>% filterLatest %>% removeChina %>% 
+  ggplot(aes(reorder(`Country/Region`,-Infections),Infections))+
+  geom_col() +theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+data_long %>% 
+  filterCore %>% 
+  ggplot(aes(Date,Infections))+geom_col()+facet_wrap(~`Country/Region`)
+
+data_long %>% 
+  filterCore %>% filterRecent() %>% 
+  ggplot(aes(Date,Confirmed))+geom_col()+facet_wrap(~`Country/Region`)
+
+
+```
+
+
+
+## Maps
+
+```{r, eval=F}
+
+## Estimate Rate - stupid model
+data_long %>% filterRecent() %>% filterAffected() %>% 
+  mutate(Past = 1/as.numeric(1+max(Date)-Date)^2) %>% 
+  lm(log(Rate)~`Country/Region`,data=.,weights = Past) -> model_rate
+
+## Estimate rate - standard model
+data_long %>% filterRecent() %>% filterAffected() %>% filterCore() %>% 
+  lm(log(Confirmed)~0+`Country/Region`+`Country/Region`:doy,data=.) -> model_rate
+
+## Estimate rate - deaths
+
+data_long %>% filterRecent() %>% filter(Deaths>0) %>% filterCore %>% 
+  lm(log(Deaths)~0+`Country/Region`+`Country/Region`:doy,data=.) -> death_rate
+
+
+
+data_long %>% filterRecent() %>% filter(Confirmed > 600) %>% filter(`Country/Region`!='Cruise Ship') %>% removeChina() %>% shift_country('Italy',2) %>% shift_country('Germany',8) %>% shift_country('Iran',7) %>% shift_country('Denmark',15) %>% 
+  ggplot(aes(Date,Infections,group=`Country/Region`)) + geom_col(aes(fill=`Country/Region`),position='dodge') #+ geom_point(aes(shape=`Country/Region`)) + theme_minimal()
+
+
+
+data_long %>% filterRecent(start = '2020-2-20') %>% filter(`Country/Region`=='Republic of Korea') %>% 
+  ggplot(aes(Date,Rate,group=`Country/Region`))+geom_path(aes(col=`Country/Region`)) + geom_smooth(aes(y=Deaths/lag(Deaths)),col='red')+ geom_path(aes(y=Deaths/lag(Deaths)),lty=2) + geom_smooth(aes(y=Rate))
+
+data_long %>% filterRecent(start = '2020-2-20') %>% filter(`Country/Region`=='Japan') %>% 
+  ggplot(aes(Date,ADT,group=`Country/Region`))+geom_path(aes(col=`Country/Region`)) + geom_smooth(aes(y=Deaths/lag(Deaths)),col='red')+ geom_path(aes(y=Deaths/lag(Deaths)),lty=2) + geom_smooth(aes(y=Rate))
+
+## Estimated rate of spread
+exp(coefficients(model_rate)[7:12])
+
+## Estimated start of epidemic
+dmy('01-01-2020')-coefficients(death_rate)[1:6]/coefficients(death_rate)[7:12]- (dmy('01-01-2020')-coefficients(model_rate)[1:6]/coefficients(model_rate)[7:12] )
+
+## predict current number
+data_long %>% filterAffected() %>% filterLatest() %>% filterCore() %>% ungroup %>% 
+  predict(model_rate,newdata = .) %>% exp()
+
+data_long %>% filter(Confirmed > 100) %>% filterLatest() %>% ungroup %>% mutate(`Country/Region` = reorder(`Country/Region`,-rank(Confirmed-Deaths-Recovered,ties='first'))) %>% 
+  ggplot(aes(`Country/Region`,Confirmed - Deaths - Recovered)) + geom_col() + theme(axis.text.x=element_text(angle=90, hjust=1))+scale_y_log10()
+
+```
+
+
+```{r momaps,message=FALSE, warning=FALSE, echo=FALSE, paged.print=FALSE}
+
+
+world_confirmed <- data_long %>% filterLatest() %>% plot_world(variable='Confirmed')
+world_deaths <- data_long %>% filterLatest() %>% plot_world(variable = 'Deaths')
+world_recovered <- data_long %>% filterLatest() %>% plot_world(variable = 'Active')
+world_dbp <- data_long %>% filterLatest() %>% plot_world(variable='pRate',title='Confirmed/100,000')
+world_adt <- data_long %>% filterLatest() %>% plot_world(.,variable='ADT',breaks = c(0,2,3,5,10,Inf),palette='-YlOrRd')
+world_cfr <- data_long %>% filterLatest() %>% plot_world(variable = 'mlCFR')
+
+tmap_arrange(world_confirmed,
+             world_dbp,
+             world_deaths,
+             world_cfr,
+             world_recovered,
+             world_adt,ncol=2)
+
+
+
+
+europe_confirmed <- data_long %>% filterLatest() %>% plot_europe(variable='Confirmed')
+europe_deaths <- data_long %>% filterLatest() %>% plot_europe(variable = 'Deaths')
+europe_recovered <- data_long %>% filterLatest() %>% plot_europe(variable = 'Active')
+europe_dbp <- data_long %>% filterLatest() %>% plot_europe(variable='pRate',title='Confirmed/100,000')
+europe_adt <- data_long %>% filterLatest() %>% plot_europe(.,variable='ADT',breaks = c(0,2,3,5,10,Inf),palette='-YlOrRd')
+europe_cfr <- data_long %>% filterLatest() %>% plot_europe(variable = 'mlCFR')
+
+tmap_arrange(europe_confirmed,
+             europe_deaths,
+             europe_recovered,
+             europe_dbp,
+             europe_cfr,
+             europe_adt,ncol=3)
+
+
+now_0 <- data_long %>% filterLatest(0) %>% plot_europe(.,variable='ADT',palette='-YlOrRd',breaks=c(1,2,3,5,8,Inf),title='ADT now')
+now_1 <- data_long %>% filterLatest(3) %>% plot_europe(.,variable='ADT',palette='-YlOrRd',breaks=c(1,2,3,5,8,Inf),title='ADT 3d ago')
+now_2 <- data_long %>% filterLatest(7) %>% plot_europe(.,variable='ADT',palette='-YlOrRd',breaks=c(1,2,3,5,8,Inf),title='ADT 1w ago')
+now_3 <- data_long %>% filterLatest(14) %>% plot_europe(.,variable='ADT',palette='-YlOrRd',breaks=c(1,2,3,5,8,Inf),title='ADT 2w ago')
+
+tmap_arrange(now_3,now_2,now_1,now_0)
+
+
+
+```
+
