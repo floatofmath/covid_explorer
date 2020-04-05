@@ -1,6 +1,95 @@
 ## Helper Functions
 
 ## A ton of helper functions
+
+## transform aggregate case and event data to individual times
+to_time <- function(.data){
+  .data %<>%  mutate(Recoveries = pmax(0,c(0,diff(Recovered))))
+  ultimo <- .data %>% filterLatest() %$% Date
+  mlCFR <- .data %>% filterLatest() %$% mlCFR
+  naiveCFR <- .data %>% filterLatest() %$% naiveCFR
+  naiveReR <- .data %>% filterLatest() %$% {Recovered/Confirmed}
+  start <- .data %>% filter(Infections>0) %$% rep(Date,Infections)
+  deaths <- .data %>% filter(Infections>0) %$% rep(Date,DDeaths)
+  recoveries <- .data %>% filter(Infections>0) %$% rep(Date,Recoveries)
+  ## Number of unresolved cases
+  unresolved <- length(start)-length(deaths)-length(recoveries)
+  ## Vector of possible status
+  status <- rep(c('Deceased','Recovered','Unresolved'),c(length(deaths),
+                                                         length(recoveries),
+                                                         unresolved))
+  return(tibble(start,
+                end = c(deaths,recoveries,rep(ultimo,unresolved)),
+                status,
+                mlCFR,
+                naiveCFR,
+                naiveReR) %>% arrange(end))
+}
+
+exp_weights <- function(days,rate=.3){
+  ## we add a little bit to deal allow censoring on the same day
+  1-exp(-rate*days) + .01
+}
+#plot(1:20,exp_weights(1:20,rate=.3),type='l')
+## resample eventtimes times consistence with incidence
+## weights is a function of days in the past
+resample_times <- function(start,end,weights=NULL,...){
+  nx <- numeric()
+  for(i in sort(unique(end))){
+#    if(length(setdiff(xend[start <= i],nx))<sum(end==i)) browser()
+    ix <- setdiff(which(start <= i),nx)
+    if(!is.null(weights)){
+      ws = weights(i-as.numeric(start[ix]),...)
+      ws = ws/sum(ws)
+      nnx <- sample(ix,sum(end==i),prob = ws)
+    } else {  
+      nnx <- sample(ix,sum(end==i))#,prob = weights)
+    }
+    nx <- c(nx,nnx)
+#    if(any(end[xend]-start[nx]<0)) browser()
+  }
+  return(nx)
+}
+
+
+## ggplot for cuminc data
+plot_cuminc <- function(.data,CFR,ReR,mlCFR){
+  ggplot(.data,aes(time,est,col=Event))+geom_path()+
+  geom_hline(yintercept = CFR,col='red') +
+  geom_hline(yintercept = ReR,col='lightblue') +
+  annotate('text',x=60,y=ReR,label='Naive Recovery Rate',col='lightblue',vjust=1,hjust=1)+
+  annotate('text',x=60,y=CFR,label='Naive CFR',col='red',hjust=1,vjust=1)+
+  geom_hline(yintercept = mlCFR,col='red',lty=2) +
+  geom_hline(yintercept = 1-mlCFR,col='lightblue',lty=2) +
+  annotate('text',x=60,y=1-mlCFR,label='ML Recovery Rate',col='lightblue',vjust=1,hjust=1)+
+  annotate('text',x=60,y=mlCFR,label='ML CFR',col='red',hjust=1,vjust=1)+
+  ylim(0,1)+xlim(0,60) + theme_minimal() + ylab('Cumulative Incidence') + xlab('Days since first confirmed case')
+}
+
+##transform cuminc output to tibble  
+cuminc2tibble <- function(cuminc) {
+  lapply(cuminc,as_tibble) %>% bind_rows(.id='Event')
+}
+
+
+#' Apply mutation only to rows matching condition
+#'
+#' Applies a mutation only to rows matching condition, returns a dataframe of same size as input dataframe. IMPORTANT: mutate_cond works only with existing columns, but is unable to add new columns.
+#' @param .data dataframe
+#' @param condition condition matching rows in .data
+#' @param ... mutation expressions
+#' @param envir
+#'
+#' @return dataframe of same size as .data
+#' @export
+#'
+#' @examples
+mutate_cond <- function(.data, condition, ..., envir = parent.frame()) {
+  condition <- eval(substitute(condition), .data, envir)
+  .data[condition, ] <- .data[condition, ] %>% mutate(...)
+  .data
+}
+ 
 filterEurope <- function(.data,...) filter(.data,Long > -10,Long <25,Lat >40,Lat<75)
 
 filterCore <- function(.data,...) {

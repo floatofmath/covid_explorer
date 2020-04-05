@@ -1,0 +1,102 @@
+---
+title: "COVID Survival"
+author: "DI Dr. Florian Klinglmueller"
+date: "4/5/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+source('R/setup.R')
+library(survival)
+library(cmprsk)
+library(gridExtra)
+```
+
+## Estimating a competing risk model for recovery/death from COVID-19
+
+Ideally we want to estimate the cummulative incidence of recovery and death from COVID-19 after infection. To this end we would require individual level time-to-event data, starting from infection to either of the two competing events recovery/death, or if not yet observed censoring time. 
+Unfortunately we neither have the date of infection, nor individual level data. While the former could be available if data gathering is sufficiently detailed, the latter is realistically never available as time of infection is typically unknown. 
+However, also individual level data will realistically not be available in most situations. 
+
+This leaves the possibility to rely on estimators from aggregate data. This however ignores the information available from the sequence of evnts. We know e.g. that the event of a newly recorded case can only lie in the future. Consequently, we can randomly connect confirmed events with cases detected in the past. Thus we can generate a random dataset of individual time to event data that could be similar to reality. We can then use standard methods to estimate competing risks models to estimate the cumulative incidence curves for mortality and recovery, while dealing with censored events in a principled manner.
+
+For the time being I only generate a single random time to event dataset for each country and use that to estimate cumulative incidence curves. Interestingly it does not appear that there is a large variability between different realizations of randomly generated time to event datasets. That even extends to datasets generated using weighted resampling, i.e. where the propability of connecting an recent event to a past confirmed case is a function of the time difference (e.g. exponential distribution).
+
+What I do see is that such estimated mortality rates but also recovery rates typically far exceed naive estimators that divide the number of deaths or recovered by the number of cases. This is because the model assumes that unresolved cases have similar mortality/recovery rates as resolved cases. However, compared to agregate rate estimates that divide by the number of resolved cases, mortality and recovery rates obtained from models are typically smaller.
+
+We start with China and South Korea which have only few unresolved cases.
+
+
+```{r cumulative incidence}
+eventtime <- data_long %>% filter(`Country/Region` == 'China') %>% to_time
+## somehow there are 5 negative recoveries on one day
+
+eventtime %>% mutate(res=NA) %>% arrange(end) %>% 
+  mutate(res=resample_times(start,end),ix = order(end)) %$% 
+#  ggplot(aes(end[ix]-start[res]))+geom_histogram() + xlim(0,30)
+##   Surv(end[ix]-start[res],status[ix] !='Unresolved') %>% plot()
+    cuminc(end-start[res],status,cencode='Unresolved') %>% 
+  cuminc2tibble %>% plot_cuminc(eventtime$naiveCFR[1],eventtime$naiveReR[1],eventtime$mlCFR[1]) + ggtitle('China') -> cumint_china
+
+eventtime <- data_long %>% filter(`Country/Region` == 'Republic of Korea') %>% to_time
+## somehow there are 5 negative recoveries on one day
+
+eventtime %>% 
+  mutate(res=resample_times(start,end),ix = order(end)) %$% 
+#  ggplot(aes(end[ix]-start[res]))+geom_histogram() + xlim(0,30)
+##   Surv(end[ix]-start[res],status[ix] !='Unresolved') %>% plot()
+    cuminc(end-start[res],status,cencode='Unresolved') %>% 
+  cuminc2tibble %>% plot_cuminc(eventtime$naiveCFR[1],eventtime$naiveReR[1],eventtime$mlCFR[1]) + ggtitle('Korea') -> cumint_korea
+
+grid.arrange(cumint_china,cumint_korea,nrow=1)
+
+
+```
+
+Next we move to Europe where we look at Austria, Sweden, Germany and Switzerland:
+
+
+```{r cumulative incidence Europe}
+eventtime <- data_long %>% filter(`Country/Region` == 'Austria') %>% to_time
+## somehow there are 5 negative recoveries on one day
+
+eventtime %>% mutate(res=NA) %>% arrange(end) %>% 
+  mutate(res=resample_times(start,end),ix = order(end)) %$% 
+#  ggplot(aes(end[ix]-start[res]))+geom_histogram() + xlim(0,30)
+##   Surv(end[ix]-start[res],status[ix] !='Unresolved') %>% plot()
+    cuminc(end-start[res],status,cencode='Unresolved') %>% 
+  cuminc2tibble %>% plot_cuminc(eventtime$naiveCFR[1],eventtime$naiveReR[1],eventtime$mlCFR[1]) + ggtitle('Austria') -> cumint_austria
+
+eventtime <- data_long %>% filter(`Country/Region` == 'Sweden') %>% to_time
+## somehow there are 5 negative recoveries on one day
+
+eventtime %>% 
+  mutate(res=resample_times(start,end),ix = order(end)) %$% 
+#  ggplot(aes(end[ix]-start[res]))+geom_histogram() + xlim(0,30)
+##   Surv(end[ix]-start[res],status[ix] !='Unresolved') %>% plot()
+    cuminc(end-start[res],status,cencode='Unresolved') %>% 
+  cuminc2tibble %>% plot_cuminc(eventtime$naiveCFR[1],eventtime$naiveReR[1],eventtime$mlCFR[1]) + ggtitle('Sweden') -> cumint_sweden
+
+eventtime <- data_long %>% filter(`Country/Region` == 'Germany') %>% to_time
+eventtime %>% mutate(res=NA) %>% arrange(end) %>% 
+  mutate(res=resample_times(start,end),ix = order(end)) %$% 
+#  ggplot(aes(end[ix]-start[res]))+geom_histogram() + xlim(0,30)
+##   Surv(end[ix]-start[res],status[ix] !='Unresolved') %>% plot()
+    cuminc(end-start[res],status,cencode='Unresolved') %>% 
+  cuminc2tibble %>% plot_cuminc(eventtime$naiveCFR[1],eventtime$naiveReR[1],eventtime$mlCFR[1]) + ggtitle('Germany') -> cumint_germany
+
+eventtime <- data_long %>% filter(`Country/Region` == 'Italy') %>% to_time
+## somehow there are 5 negative recoveries on one day
+
+eventtime %>% 
+  mutate(res=resample_times(start,end),ix = order(end)) %$% 
+#  ggplot(aes(end[ix]-start[res]))+geom_histogram() + xlim(0,30)
+##   Surv(end[ix]-start[res],status[ix] !='Unresolved') %>% plot()
+    cuminc(end-start[res],status,cencode='Unresolved') %>% 
+  cuminc2tibble %>% plot_cuminc(eventtime$naiveCFR[1],eventtime$naiveReR[1],eventtime$mlCFR[1]) + ggtitle('Italy') -> cumint_italy
+
+grid.arrange(cumint_austria,cumint_sweden,cumint_germany,cumint_italy,ncol=2)
+
+
+```

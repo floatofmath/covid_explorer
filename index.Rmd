@@ -22,7 +22,7 @@ I perform a little bit of pre-processing. Mainly I collapse data for the US and 
 
 
 
-
+*Some new results on survival [cumulative incidence of death and recovery](resample_cumint.html)* 
 
 
 In terms of statistics I present absolute figures for confirmed cases, deaths, and recovered. I also compute relative figures in terms of cases per 100 000 population. These use population numbers as provided in spData package. Interestingly this population numbers are not available for all countries in this package. For some of the missing countries (Norway, France, ...) I have entered numbers as found on wikipedia. This is probably not entirely accurate, as they may not be from comparable census times, but who cares at this moment.
