@@ -53,18 +53,34 @@ resample_times <- function(start,end,weights=NULL,...){
 
 
 ## ggplot for cuminc data
-plot_cuminc <- function(.data,CFR,ReR,mlCFR){
+plot_cuminc <- function(.data){
   ggplot(.data,aes(time,est,col=Event))+geom_path()+
-  geom_hline(yintercept = CFR,col='red') +
-  geom_hline(yintercept = ReR,col='lightblue') +
-  annotate('text',x=60,y=ReR,label='Naive Recovery Rate',col='lightblue',vjust=1,hjust=1)+
-  annotate('text',x=60,y=CFR,label='Naive CFR',col='red',hjust=1,vjust=1)+
-  geom_hline(yintercept = mlCFR,col='red',lty=2) +
-  geom_hline(yintercept = 1-mlCFR,col='lightblue',lty=2) +
-  annotate('text',x=60,y=1-mlCFR,label='ML Recovery Rate',col='lightblue',vjust=1,hjust=1)+
-  annotate('text',x=60,y=mlCFR,label='ML CFR',col='red',hjust=1,vjust=1)+
+  # geom_hline(yintercept = CFR,col='red') +
+  # geom_hline(yintercept = ReR,col='lightblue') +
+  # annotate('text',x=60,y=ReR,label='Naive Recovery Rate',col='lightblue',vjust=1,hjust=1)+
+  # annotate('text',x=60,y=CFR,label='Naive CFR',col='red',hjust=1,vjust=1)+
+  # geom_hline(yintercept = mlCFR,col='red',lty=2) +
+  # geom_hline(yintercept = 1-mlCFR,col='lightblue',lty=2) +
+  # annotate('text',x=60,y=1-mlCFR,label='ML Recovery Rate',col='lightblue',vjust=1,hjust=1)+
+  # annotate('text',x=60,y=mlCFR,label='ML CFR',col='red',hjust=1,vjust=1)+
   ylim(0,1)+xlim(0,60) + theme_minimal() + ylab('Cumulative Incidence') + xlab('Days since first confirmed case')
 }
+
+estimate_surv <- function(.data,country,cut_date=NULL,...){
+  if(is.null(cut_date)) 
+    cut_date <- .data %>% filter(`Country/Region`==country) %$% max(Date)
+  eventtime <- .data %>% 
+    filter(`Country/Region` == country) %>% 
+    filter(Date <= cut_date) %>% 
+    to_time
+  ## somehow there are 5 negative recoveries on one day
+  eventtime %>% mutate(res=NA) %>% arrange(end) %>% 
+  mutate(res=resample_times(start,end,...),ix = order(end)) %$% 
+#  ggplot(aes(end[ix]-start[res]))+geom_histogram() + xlim(0,30)
+##   Surv(end[ix]-start[res],status[ix] !='Unresolved') %>% plot()
+    cuminc(end-start[res],status,cencode='Unresolved') %>% cuminc2tibble
+}
+
 
 ##transform cuminc output to tibble  
 cuminc2tibble <- function(cuminc) {

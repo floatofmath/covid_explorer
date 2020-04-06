@@ -14,28 +14,32 @@ editor_options:
 source('R/setup.R')
 ```
 
-## Pre-processing
+
+## News
+
+*Some new analyses of [cumulative incidence of death and recovery](resample_cumint.html) using random attribution of events to cases*
+
+## Notes 
+
+Here are some plots of COVID-19 data, that I have prepared and update regularly. 
 
 I import the data from the Coronavirus COVID-19 Global Cases by Johns Hopkins CSSE Dashboard which provides raw-data at https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/. Data are updated daily, but may not be as recent as depicted on the online dashboard. 
 
 I perform a little bit of pre-processing. Mainly I collapse data for the US and China. These data are provided on the provincial level, which makes it difficult to visualise using mapping software. Having these data on the country level lets me easily use different mapping tools that provide mapping data on the country level. 
 
+I spend most of my time designing new figures, so please excuse if annotation and documentation is scarce. Occasionally, data artefacts (missing numbers), or things I didn't anticipted (declinign active cases) result in botched figures, which I may not fix immediately.
 
+For some figures I compute relative figures in terms of cases per 100 000 population. These use population numbers as provided in spData package. Interestingly these numbers are not available for all countries in this package. For some of the missing countries (Norway, France, ...) I have entered numbers as found on wikipedia. This is probably not entirely accurate, as they may not be from comparable census times.
 
-*Some new results on survival [cumulative incidence of death and recovery](resample_cumint.html)* 
+Matching country names between disease data and mapping data is not complete. Some countries report numbers for different regions (Canada, US, China,...). I have colapsed numbers from those countries. Other countries e.g. Northern Macedonia have different names between datasets. For some of the affected countries I have attempted to unify names, others I may have missed. Currently, most countries outside Africa appear to be matched correctly.
 
+I do estimate a couple of statistics. First I estimate the average doubling time, I use a period of 7 days (i.e. $ADT_t = \frac{7}{log_2(x_t - x_{t-7})}$) this is purely heuristic, but it appears to provide a good balance between variability and responsiveness to policy changes (as I have gauged from looking at Italy). 
 
-In terms of statistics I present absolute figures for confirmed cases, deaths, and recovered. I also compute relative figures in terms of cases per 100 000 population. These use population numbers as provided in spData package. Interestingly this population numbers are not available for all countries in this package. For some of the missing countries (Norway, France, ...) I have entered numbers as found on wikipedia. This is probably not entirely accurate, as they may not be from comparable census times, but who cares at this moment.
+<!-- I do estimate infection rates by I modelling the logarithm of confirmed cases using a fixed effect for country and the interaction between date and country. That provides an estimate of the 'start' of the epidemic (via country-wise intercept) and infection rate per country. However, the latter would require that countries follow an exponential curve. We should hope this assumption does no longer hold for those countries that have implemented measures. [Currently these data are not shown] -->
 
-Matching country names between disease data and mapping data is not complete. Some countries report numbers for different regions (Canada,US,China,...). I have colapsed numbers from those countries. Other countries e.g. Northern Macedonia have different names between datasets. For some of the affected countries I have attempted to unify names, others I may have missed (esp. Africa is a big place).
+I do estimate the case fatality rate using a simple estimator that is recommended here and here - TODO add links to papers. This basically divides the number of fatalities by the number of resolved cases, which implies the assumption that unresolved cases will recover or die at the same rate as resolved cases.
 
-I do estimate a couple of statistics. First I estimate the average doubling time, I use a period of 7 days (i.e. $adt_t = \frac{7}{log_2(x_t - x_{t-7}}$) this is purely heuristic, but it appears to provide a good balance between variability and responsiveness to policy changes (as I have gauged from looking at Italy). 
-
-I do estimate infection rates by I modelling the logarithm of confirmed cases using a fixed effect for country and the interaction between date and country. That provides an estimate of the 'start' of the epidemic (via country-wise intercept) and infection rate per country. However, the latter would require that countries follow an exponential curve. We should hope this assumption does no longer hold for those countries that have implemented measures. [Currently these data are not shown]
-
-I do estimate the case fatality rate using a simple estimator that is recommended here and here - TODO add links to papers. This basically divides the number of fatalities by the number of resolved cases, which implies the assumption that unresolved cases will recover or die at the same rate as resolved cases. o
-
-Finally, a big caveat is that we can only see figures for subjects that were tested positive. Different testing capacities and approaches therefore can have a large influence on the numbers. To adress this issue I now show a couple of plots for rates and average doubling times of deaths. I would suppose that deaths are detected more precisely, but there are issues with testing deceased as well. 
+Finally, the largest issue is certainly that all analyses can only as good as the numbers. I have no detailed insight into the testing and reporting practices of different countries, but from what one can glean from the media some dynamics in the data of certain countries likely reflect more the process of data gathering than the disease. This may be less of an issue with mortality figures, however, I would suppose that there are issues with attribution of disease related mortality as well. 
 
 ```{r map preparations}
 mapEurope <- borders('world',xlim=c(-10,25),ylim=c(40,75),colour='gray90',fill='gray50')
@@ -77,8 +81,8 @@ data_long %>% filterCore() %>%
 data_long %>% filterCore() %>% 
   filterRecent() %>% country_lines(ADTD) + ylab('Average doubling time deaths')
 
-data_long %>% filterCore() %>% 
-  filterRecent() %>% country_lines(ADTL) + ylab('Average doubling time active cases')
+# data_long %>% filterCore() %>% 
+#   filterRecent() %>% country_lines(ADTL) + ylab('Average doubling time active cases')
 
 data_long %>% filterCore() %>% filterRecent() %>% 
   ggplot(aes(Date,Active)) + geom_col() + facet_wrap(~`Country/Region`,scales='free_y',nrow=2) + theme_minimal()
