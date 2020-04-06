@@ -63,7 +63,7 @@ plot_cuminc <- function(.data){
   # geom_hline(yintercept = 1-mlCFR,col='lightblue',lty=2) +
   # annotate('text',x=60,y=1-mlCFR,label='ML Recovery Rate',col='lightblue',vjust=1,hjust=1)+
   # annotate('text',x=60,y=mlCFR,label='ML CFR',col='red',hjust=1,vjust=1)+
-  ylim(0,1)+xlim(0,60) + theme_minimal() + ylab('Cumulative Incidence') + xlab('Days since first confirmed case')
+  ylim(0,1)+xlim(0,60) + theme_minimal() + ylab('Cumulative Incidence') + xlab('Days since reported as case')
 }
 
 estimate_surv <- function(.data,country,cut_date=NULL,...){
