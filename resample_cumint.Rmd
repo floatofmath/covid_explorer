@@ -19,13 +19,19 @@ library(gridExtra)
 
 ## Introduction
 
-Estimating the mortality rate of COVID-19 is a challenge for mainly two reasons: incomplete reporting and incomplete follow-up. While current best attempts to solve the former use a combination of information from complete cases like data from the Diamond Princess. Here I attempt to adress the latter problem by reconstruction of possible time-to-event data using resampling techniques. This permits the estimation cause-specific cumulative incidence rates. Which we can then use to estimate e.g. the 30 day survival rate, while handling censored data in a principled manner.
+One of the main challenges in estimating of the case fatality rate during an ongoing epidemic like COVID-19 is that for a large proportion of currently active cases the disease outcome of is yet unknown [Lipsitch - Important Biases][Lipsitch2015]. Simple approaches relate the number of disease related deaths to the total number of identified cases, or to the total number of cases for whom the outcome has already been observed. Whereas the former assumes that all unresolved cases recover, the latter assumes that unresolved cases recover or die at comparable rates as those for whom the outcome has already been observed. These aggregate estimators can be improved by methods from competing risk analysis, which in addition take advantage of information about the time to the outcome event. That is, a subject that has not yet recovered or died 30 days after identification, provides more information that a subject that has just recently been identified. 
 
-In order to estimate the cumulative incidence of mortality or recovery after infection, we would require individual level time-to-event data. That is, data on the time from the start of infection to either recovery, death, or censoring for each subject. Unfortunately we neither have the date of infection, nor individual level data. While the latter is realistically never available as time of infection is typically unknown, individual level data could be available available if data gathering is sufficiently detailed. However, in practice individual level data are not be available except for special cases, much less publicly.
+In order to estimate the cumulative incidence of mortality or recovery after infection as a function of time, however, we would require individual level time-to-event data. That is, data on the time from the start of infection to either recovery or death, or time of censoring for unresolved cases. Unfortunately such data are rarely available, especially not globally, much less publicly. Consequently, important disease characterstics are typically estimated from aggregate data. 
 
-Consequently, important disease characterstics have to be estimated from aggregate data. Which typically ignores the information available from the sequence of events. Obviously, we know that the event of a newly recorded case can only lie in the future and that save for reporting errors each event corresponds to a case detected in the past. Consequently, we can attempt to randomly connect confirmed events with cases detected in the past and construct a random dataset of individual time to event data that at least does not violate restrictions imposed by the sequence of reported events.
+While time-to-event data are hard to come by for COVID-19, well curated time-series data are available globally from various sources. While these do not provide time-to-event data, we can take advantage of information contained in the sequence of reported events. Obviously, we know that the event of a newly recorded case can only lie in the future and that save for reporting errors each event corresponds to a case detected in the past. Therefore, we randomly connect confirmed events with cases detected in the past and construct a random dataset of individual time to event data that conforms to the restrictions imposed by the temporal sequence of reported events.
 
 We can then use standard methods from competing risks models to estimate the cumulative incidence curves for mortality and recovery. 
+
+## Implementation
+
+The algorithm to connect events with past cases is fairly simple. In essence we start with the earliest outcome (death/recovery) and randomly connect it to a case confirmed in the past (relative to the event). We the progress to the next later event, until finally all events (including censored) are connected to one starting date.
+
+We then estimate the CFR using Fine and Gray's model for competing risk data to estimate the CFR.
 
 For the time being I only generate a single random time to event dataset for each country and use that to estimate cumulative incidence curves. Ideally, one would generate several "random" dataset to quantify the possible range of different estimates. Also currently, I sampling is such that each event is matched a case in the past with equal probablity. This can be improved by applying sampling weights from a survival distributions. However, that makes the process quite a bit slower and results do not differ substantially, so for the moment I use uniform sampling weights.
 
@@ -92,3 +98,21 @@ grid.arrange(plot_cumint_austria,plot_cumint_sweden,
 While Austria and Germany appear quite similar to South Korea. Italy and Sweden show quite different results. Italy has a substantially higher mortality rate than then the other countries in this comparison. After 40 days about 25% of cases die, whereas only about 38% of subjects are recovered. *This may be due to specifics of the testing practice with only hospitalized subjects tested (based on hearsay need source)*. Sweden which also follows a different strategy, also appears to have a high mortality rate with about 18% deceased 30 days after detection, and only about 8% recovered after about the same amount of time. Clearly there has to be some explanation in the way Sweden tests cases and determines recovery. 
 
 For Austria I estimate about 4% deceased after 30 days and about 70% recovered after about the same amount of time. For Germany we obtain an estimate around 4% after about a month and a recovery rate of about 96% after about 2 months. This is probably because Germany had a few very early cases, and can be seen also in the long horizontal segment in the recovery curve between about 30 and 50 days.
+
+
+## Methods
+
+We estimate the cumulative incidence curves for mortality and recovery using the Fine and Gray model as implement in packages `cmprsk`. This  model assumes that subjects that experience are no longer at risk of experiencing competing events. This means for competing events death and recovery that those who die can no longer recover, and that those who recover can no longer die (from disease). 
+
+
+
+
+## References
+
+[Farley2001]: Farley, Timothy MM, Mohamed M. Ali, and Emma Slaymaker. "Competing approaches to analysis of failure times with competing risks." Statistics in medicine 20.23 (2001): 3601-3610.
+
+[Jewel2007]: Jewell, Nicholas P., et al. "Non‐parametric estimation of the case fatality ratio with competing risks data: an application to Severe Acute Respiratory Syndrome (SARS)." Statistics in medicine 26.9 (2007): 1982-1998.
+
+[Tuite2010] Tuite, Ashleigh R., et al. "Estimated epidemiologic parameters and morbidity associated with pandemic H1N1 influenza." Cmaj 182.2 (2010): 131-136.
+
+[Lipsitsch2015]: Lipsitch, Marc, et al. "Potential biases in estimating absolute and relative case-fatality risks during outbreaks." PLoS neglected tropical diseases 9.7 (2015).

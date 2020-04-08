@@ -14,6 +14,9 @@ editor_options:
 source('R/setup.R')
 ```
 
+## Disclaimre
+
+Please note the opinions that these reflect personal opinion. My remarks do not necessarily reflect the official view of AGES, BASG, EMA, or any associated working party or committee. 
 
 ## News
 
@@ -64,14 +67,14 @@ data_long %<>%  mutate(pRate = 1e5*Confirmed/pop)
 ```{r core plots}
 data_long %>% group_by(Date) %>% summarise(Active = sum(Active,na.rm=T),Deaths = sum(Deaths,na.rm=T),Recovered=sum(Recovered,na.rm=T)) %>% 
   gather(Status,Cases,-Date) %>% 
-  mutate(Status = ordered(Status,levels=c('Active','Recovered','Deaths'))) %>% 
+  mutate(Status = ordered(Status,levels=c('Deaths','Recovered','Active'))) %>% 
   ggplot(aes(Date,Cases,group=Status))+geom_col(aes(fill=Status))+theme_minimal() + scale_y_continuous(labels=scales::comma)
 
 data_long %>% group_by(Date,continent) %>% 
   summarise(Active = sum(Active,na.rm=T),Deaths = sum(Deaths,na.rm=T),Recovered=sum(Recovered,na.rm=T)) %>%
   filter(!is.na(continent)) %>% 
   gather(Status,Cases,-Date,-continent) %>%
-  mutate(Status = ordered(Status,levels=c('Active','Recovered','Deaths'))) %>%
+  mutate(Status = ordered(Status,levels=c('Deaths','Recovered','Active'))) %>%
   ggplot(aes(Date,Cases))+geom_col(aes(fill=Status))+theme_minimal()+facet_wrap(~continent,scales='free_y') + scale_y_continuous(labels=scales::comma)
 
 
