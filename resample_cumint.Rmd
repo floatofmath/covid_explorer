@@ -59,7 +59,9 @@ data_long %>% estimate_surv('China') -> cumint_china
 plot_cuminc(cumint_china) + ggtitle('China') -> plot_cumint_china
 
 data_long %>% estimate_surv('Republic of Korea') -> cumint_korea
-#cumint_korea %>% group_by(Event) %>% arrange(time) %>% slice(n()-1)
+
+
+
 est_cumint <- function(cumint) group_by(cumint,Event) %>% arrange(time) %>% slice(n()-1)
 
 plot_cuminc(cumint_korea) + ggtitle('Korea') -> plot_cumint_korea
@@ -67,7 +69,7 @@ plot_cuminc(cumint_korea) + ggtitle('Korea') -> plot_cumint_korea
 grid.arrange(plot_cumint_china,plot_cumint_korea,nrow=1)
 
 ```
-As China was the country first affected by COVID-19 it has the longest follow-up and the largest proportion of resolved cases. Similarly South Korea was hit early and has since a large proportion of resolved cases. In China about 75% of subjects recovered 30 days following detection. In South Korea this proportion is slightly lower. However, ultimately we are interested in the limit of recovery and mortality. For China the last estimate on the curve is about 96% recoverd at day 72 and 4% deceased at Day 65. For Korea it is about 90% recovered at Day 60 and 2% deceased at Day 38. 
+As China was the country first affected by COVID-19 it has the longest follow-up and the largest proportion of resolved cases. Similarly South Korea was hit early and has since a large proportion of resolved cases. In China about 75% of subjects recovered 30 days following detection. In South Korea this proportion is slightly lower. However, ultimately we are interested in the limit of recovery and mortality. For China the last estimate on the curve is about `r cumint_china %>% est_rec`% recoverd and `r cumint_china %>% est_cfr`% deceased. For Korea it is about `r cumint_korea %>% est_rec`% recovered and `r cumint_korea %>% est_cfr`% deceased. Note that this estimate does not add up to 100%. That means that at even after the longest observed disease duration some cases are not yet considered resolved. I have noticed that this figure is varying quite a bit across samplings. Standard practice appears to be to normalize these estimates (i.e. divide one rate by the sum of both rates) at a late point in the disease duration. 
 
 ## Europe
 
@@ -95,10 +97,11 @@ grid.arrange(plot_cumint_austria,plot_cumint_sweden,
 
 ```
 
-While Austria and Germany appear quite similar to South Korea. Italy and Sweden show quite different results. Italy has a substantially higher mortality rate than then the other countries in this comparison. After 40 days about 25% of cases die, whereas only about 38% of subjects are recovered. *This may be due to specifics of the testing practice with only hospitalized subjects tested (based on hearsay need source)*. Sweden which also follows a different strategy, also appears to have a high mortality rate with about 18% deceased 30 days after detection, and only about 8% recovered after about the same amount of time. Clearly there has to be some explanation in the way Sweden tests cases and determines recovery. 
+While Austria and Germany appear quite similar to South Korea. Italy and Sweden show quite different results. Italy has a substantially higher mortality rate than then the other countries in this comparison. About `r cumint_italy %>% est_rec`% recoverd and `r cumint_italy %>% est_cfr`% died. *This may be due to specifics of the testing practice with only hospitalized subjects tested (based on hearsay need source)*. Sweden which also follows a different strategy, also appears to have a high mortality rate and at least for now a lower recovery rate. About `r cumint_sweden %>% est_rec`% recoverd and `r cumint_sweden %>% est_cfr`% died. Clearly there has to be some explanation in the way Sweden tests cases and determines recovery. 
 
-For Austria I estimate about 4% deceased after 30 days and about 70% recovered after about the same amount of time. For Germany we obtain an estimate around 4% after about a month and a recovery rate of about 96% after about 2 months. This is probably because Germany had a few very early cases, and can be seen also in the long horizontal segment in the recovery curve between about 30 and 50 days.
+For Austria, I estimate about `r cumint_austria %>% est_rec`% recoverd and `r cumint_austria %>% est_cfr`% died. For Germany we obtain an estimate about `r cumint_germany %>% est_rec`% recoverd and `r cumint_germany %>% est_cfr`% died. In Germany the cumulative incidence curve for recovery is substantially longer than for mortality. This is probably because Germany had a few very early cases, and can be seen also in the long horizontal segment in the recovery curve between about 30 and 50 days.
 
+Overall we see that Austria, Germany, and Korea show quite similar characteristics. One reason may be that those countries appear to be testing quite a lot of subjects, whereas Italy and Sweden are more focused on severe/hospitalized cases in their testing programs.  
 
 ## Methods
 

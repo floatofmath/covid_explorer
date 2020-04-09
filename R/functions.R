@@ -2,6 +2,15 @@
 
 ## A ton of helper functions
 
+est_rec <- function(.data)
+  .data %>%  group_by(Event) %>% arrange(time) %>% slice(n()-1) %>% 
+  filter(Event == '1 Recovered') %$% round(est*100)
+
+est_cfr <- function(.data)
+  .data %>%  group_by(Event) %>% arrange(time) %>% slice(n()-1) %>% 
+  filter(Event == '1 Deceased') %$% round(est*100)
+
+
 ## transform aggregate case and event data to individual times
 to_time <- function(.data){
   .data %<>%  mutate(Recoveries = pmax(0,c(0,diff(Recovered))))
