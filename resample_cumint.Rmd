@@ -29,11 +29,11 @@ We can then use standard methods from competing risks models to estimate the cum
 
 ## Implementation
 
-The algorithm to connect events with past cases is fairly simple. In essence we start with the earliest outcome (death/recovery) and randomly connect it to a case confirmed in the past (relative to the event). We the progress to the next later event, until finally all events (including censored) are connected to one starting date.
+The algorithm to connect events with past cases is fairly simple. In essence we start with the earliest outcome (death/recovery) and randomly connect it to a case confirmed in the past (relative to the event). We then progress to the next later event, until finally all events (including censored) are connected to one starting date.
 
 We then estimate the CFR using Fine and Gray's model for competing risk data to estimate the CFR.
 
-For the time being I only generate a single random time to event dataset for each country and use that to estimate cumulative incidence curves. Ideally, one would generate several "random" dataset to quantify the possible range of different estimates. Also currently, I sampling is such that each event is matched a case in the past with equal probablity. This can be improved by applying sampling weights from a survival distributions. However, that makes the process quite a bit slower and results do not differ substantially, so for the moment I use uniform sampling weights.
+I now generate 20 samples of time to event datasets for each country and use that to estimate cumulative incidence curves. Currently, sampling is such that each event is matched a case in the past with equal probablity. This can be improved by applying sampling weights from a survival distributions. However, that makes the process quite a bit slower and results do not differ substantially, so for the moment I use uniform sampling weights.
 
 Interestingly it does not appear that there is a large variability between different realizations of randomly generated time to event datasets. That even extends to datasets generated using weighted resampling, i.e. where the propability of connecting an recent event to a past confirmed case is a function of the time difference (e.g. exponential distribution).
 
@@ -55,21 +55,16 @@ We start with China and South Korea which have only few unresolved cases.
 ```{r cumulative incidence}
 
 
-data_long %>% estimate_surv('China') -> cumint_china 
-plot_cuminc(cumint_china) + ggtitle('China') -> plot_cumint_china
+data_long %>% resample_surv('China',B=20) -> cumint_china 
+plot_rsurv(cumint_china) + ggtitle('China') -> plot_cumint_china
 
-data_long %>% estimate_surv('Republic of Korea') -> cumint_korea
-
-
-
-est_cumint <- function(cumint) group_by(cumint,Event) %>% arrange(time) %>% slice(n()-1)
-
-plot_cuminc(cumint_korea) + ggtitle('Korea') -> plot_cumint_korea
+data_long %>% resample_surv('Republic of Korea',B=20) -> cumint_korea
+plot_rsurv(cumint_korea) + ggtitle('Korea') -> plot_cumint_korea
 
 grid.arrange(plot_cumint_china,plot_cumint_korea,nrow=1)
 
 ```
-As China was the country first affected by COVID-19 it has the longest follow-up and the largest proportion of resolved cases. Similarly South Korea was hit early and has since a large proportion of resolved cases. In China about 75% of subjects recovered 30 days following detection. In South Korea this proportion is slightly lower. However, ultimately we are interested in the limit of recovery and mortality. For China the last estimate on the curve is about `r cumint_china %>% est_rec`% recoverd and `r cumint_china %>% est_cfr`% deceased. For Korea it is about `r cumint_korea %>% est_rec`% recovered and `r cumint_korea %>% est_cfr`% deceased. Note that this estimate does not add up to 100%. That means that at even after the longest observed disease duration some cases are not yet considered resolved. I have noticed that this figure is varying quite a bit across samplings. Standard practice appears to be to normalize these estimates (i.e. divide one rate by the sum of both rates) at a late point in the disease duration. 
+As China was the country first affected by COVID-19 it has the longest follow-up and the largest proportion of resolved cases. Similarly South Korea was hit early and has since a large proportion of resolved cases. In China about 75% of subjects recovered 30 days following detection. In South Korea this proportion is slightly lower. However, ultimately we are interested in the limit of recovery and mortality. For China the last estimate on the curve is about `r cumint_china %>% average_rsurv %>% predict_cuminc %$% {1-normCFR}`% recoverd and `r cumint_china %>% average_rsurv %>% predict_cuminc %$% normCFR`% deceased. For Korea it is about `r cumint_korea %>% average_rsurv %>% predict_cuminc %$% {1-normCFR}`% recovered and `r cumint_korea %>% average_rsurv %>% predict_cuminc %$% {normCFR}`% deceased. Note that this estimate does not add up to 100%. That means that at even after the longest observed disease duration some cases are not yet considered resolved. I have noticed that this figure is varying quite a bit across samplings. Standard practice appears to be to normalize these estimates (i.e. divide one rate by the sum of both rates) at a late point in the disease duration. 
 
 ## Europe
 
@@ -77,19 +72,23 @@ Next we move to Europe where we look at Austria, Sweden, Germany and Italy:
 
 
 ```{r cumulative incidence Europe}
-cumint_austria <-  data_long %>% estimate_surv('Austria') 
+cumint_austria <-  data_long %>% resample_surv('Austria',B=50) 
 #est_cumint(cumint_austria)
-plot_cuminc(cumint_austria) + ggtitle('Austria') -> plot_cumint_austria
+plot_rsurv(cumint_austria) + ggtitle('Austria') -> plot_cumint_austria
 
-cumint_sweden <- estimate_surv(data_long,'Sweden') 
-plot_cuminc(cumint_sweden) + ggtitle('Sweden') -> plot_cumint_sweden
+cumint_sweden <- resample_surv(data_long,'Sweden',B=50) 
+plot_rsurv(cumint_sweden) + ggtitle('Sweden') -> plot_cumint_sweden
 
-cumint_germany <- estimate_surv(data_long,'Germany')
+## Germany reports 31 resurections the day before Easter!
+## data_long %>% filter(`Country/Region`=='Germany',DDeaths<0)
+## Quickfix to get everything working again:
+data_long %<>% mutate(DDeaths = pmax(0,DDeaths))
+cumint_germany <- resample_surv(data_long,'Germany',B=50)
 #est_cumint(cumint_germany)
-plot_cuminc(cumint_germany) + ggtitle('Germany') -> plot_cumint_germany
+plot_rsurv(cumint_germany) + ggtitle('Germany') -> plot_cumint_germany
 
-cumint_italy <- estimate_surv(data_long,'Italy')
-plot_cuminc(cumint_italy) + ggtitle('Italy') -> plot_cumint_italy
+cumint_italy <- resample_surv(data_long,'Italy',B=50)
+plot_rsurv(cumint_italy) + ggtitle('Italy') -> plot_cumint_italy
 
 grid.arrange(plot_cumint_austria,plot_cumint_sweden,
              plot_cumint_germany,plot_cumint_italy,ncol=2)
@@ -97,17 +96,19 @@ grid.arrange(plot_cumint_austria,plot_cumint_sweden,
 
 ```
 
-While Austria and Germany appear quite similar to South Korea. Italy and Sweden show quite different results. Italy has a substantially higher mortality rate than then the other countries in this comparison. About `r cumint_italy %>% est_rec`% recoverd and `r cumint_italy %>% est_cfr`% died. *This may be due to specifics of the testing practice with only hospitalized subjects tested (based on hearsay need source)*. Sweden which also follows a different strategy, also appears to have a high mortality rate and at least for now a lower recovery rate. About `r cumint_sweden %>% est_rec`% recoverd and `r cumint_sweden %>% est_cfr`% died. Clearly there has to be some explanation in the way Sweden tests cases and determines recovery. 
+While Austria and Germany appear quite similar to South Korea. Italy and Sweden show quite different results. Italy has a substantially higher mortality rate than then the other countries in this comparison. About `r cumint_italy %>% average_rsurv %>% predict_cuminc %$% {1-normCFR}`% recoverd and `r cumint_italy %>% average_rsurv %>% predict_cuminc %$% {normCFR}`% died. *This may be due to specifics of the testing practice with only hospitalized subjects tested (based on hearsay need source)*. Sweden which also follows a different strategy, also appears to have a high mortality rate and at least for now a lower recovery rate. About `r cumint_sweden %>% average_rsurv %>% predict_cuminc %$% {1-normCFR}`% recoverd and `r cumint_sweden %>% average_rsurv %>% predict_cuminc %$% {normCFR}`% died. Clearly there has to be some explanation in the way Sweden tests cases and determines recovery. 
 
-For Austria, I estimate about `r cumint_austria %>% est_rec`% recoverd and `r cumint_austria %>% est_cfr`% died. For Germany we obtain an estimate about `r cumint_germany %>% est_rec`% recoverd and `r cumint_germany %>% est_cfr`% died. In Germany the cumulative incidence curve for recovery is substantially longer than for mortality. This is probably because Germany had a few very early cases, and can be seen also in the long horizontal segment in the recovery curve between about 30 and 50 days.
+For Austria, I estimate about `r cumint_austria %>% average_rsurv %>% predict_cuminc %$% {1-normCFR}`% recoverd and `r cumint_austria %>% average_rsurv %>% predict_cuminc %$% {normCFR}`% died. For Germany we obtain an estimate about `r cumint_germany %>% average_rsurv %>% predict_cuminc %$% {1-normCFR}`% recoverd and `r cumint_germany %>% average_rsurv %>% predict_cuminc %$% {normCFR}`% died. In Germany the cumulative incidence curve for recovery is substantially longer than for mortality. This is probably because Germany had a few very early cases, and can be seen also in the long horizontal segment in the recovery curve between about 30 and 50 days.
 
 Overall we see that Austria, Germany, and Korea show quite similar characteristics. One reason may be that those countries appear to be testing quite a lot of subjects, whereas Italy and Sweden are more focused on severe/hospitalized cases in their testing programs.  
 
-## Methods
+## Limitations
 
-We estimate the cumulative incidence curves for mortality and recovery using the Fine and Gray model as implement in packages `cmprsk`. This  model assumes that subjects that experience are no longer at risk of experiencing competing events. This means for competing events death and recovery that those who die can no longer recover, and that those who recover can no longer die (from disease). 
+One needs to be aware of the rather strong limitations underlying the analyses presented here. First, the disease characteristics modelled here are conditional on being identified as a case. We can be confident that the different national testing programmes do not produce unbiased estimates of the true prevalence. Moreover, testing programmes differ substantially between countries. Some countries perform comprehensive widespread testing whereas others limit testing to the relatively obvious/severe cases. In addition, we know that data on dates are far from accurate. The data are essentially left censored as we do not really know the time of infection, or onset of symptoms, which would be much more relevant starting points for this analysis. It has been reported that deceased subjects are often reported only with substantial delay, and time of recovery is difficult to pinpoint exactly and is defined in various ways (a couple of days after symptoms stop, two negative test, ...).
 
+```{r}
 
+```
 
 
 ## References

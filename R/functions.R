@@ -11,6 +11,42 @@ est_cfr <- function(.data)
   filter(Event == '1 Deceased') %$% round(est*100)
 
 
+## latest timepoint where estimates of both mortality and recovery are available    
+#cuminc_maxtime <- function(.data){
+predict_cuminc <- function(.data,day=c('max','all',30)){
+    day = day[1]
+    .data %>% group_by(Event) %>% 
+      mutate(mt = max(time)) %>% 
+      filter(time!=max(time)) %>% group_by(time,Event) %>% 
+      slice(n()) %>% dplyr::select(Event,time,est) %>% spread(Event,est) %>% mutate(normCFR = Deceased/(Deceased+Recovered)) %>% ungroup -> res
+    if(day=='all'){
+      return(res)
+    } else if(is.numeric(day)){
+        return(filter(res,time == day))
+    } else if(day == 'max') {
+        res %>% filter(!is.na(normCFR)) %>% arrange(time) %>% slice(n()) %>% return()
+    } else {
+      stop('Parameter "day" misspecified')
+    }
+}
+      
+resample_surv <- function(.data,country,B=10,...){
+  lapply(1:B,function(i) data_long %>% 
+           estimate_surv(country,...)) %>% 
+    bind_rows(.id='replicate')
+}
+
+average_rsurv <- function(.data,prop=.3){
+  .data %>% group_by(Event,time) %>% mutate(n=n()) %>% ungroup() %>% mutate(m = max(n)) %>% filter(n/m>prop) %>% 
+    
+  group_by(Event,time) %>% summarize(est=median(est))
+}
+
+plot_rsurv <- function(.data){
+  .data %>% ggplot(aes(time,est,colour=Event)) + geom_path(aes(group=replicate),alpha=.01) + 
+    geom_path(aes(time,est,colour=Event),data=average_rsurv(.data),alpha=1) + theme_minimal()
+}
+
 ## transform aggregate case and event data to individual times
 to_time <- function(.data){
   .data %<>%  mutate(Recoveries = pmax(0,c(0,diff(Recovered))))
@@ -47,13 +83,27 @@ resample_times <- function(start,end,weights=NULL,...){
   for(i in sort(unique(end))){
 #    if(length(setdiff(xend[start <= i],nx))<sum(end==i)) browser()
     ix <- setdiff(which(start <= i),nx)
-    if(!is.null(weights)){
+    if(is.null(weights)){
+      nnx <- sample(ix,sum(end==i))#,prob = weights)
+    } else if(is.character(weights)) {
+      nnx <- head(ix[order(start[ix],decreasing={weights=='decreasing'})],sum(end==i))
+    } else {
       ws = weights(i-as.numeric(start[ix]),...)
       ws = ws/sum(ws)
       nnx <- sample(ix,sum(end==i),prob = ws)
-    } else {  
-      nnx <- sample(ix,sum(end==i))#,prob = weights)
-    }
+    } 
+    nx <- c(nx,nnx)
+#    if(any(end[xend]-start[nx]<0)) browser()
+  }
+  return(nx)
+}
+
+resample_times_fix <- function(start,end,decreasing=FALSE,...){
+  nx <- numeric()
+  for(i in sort(unique(end))){
+#    if(length(setdiff(xend[start <= i],nx))<sum(end==i)) browser()
+    ix <- setdiff(which(start <= i),nx)
+
     nx <- c(nx,nnx)
 #    if(any(end[xend]-start[nx]<0)) browser()
   }
@@ -93,7 +143,7 @@ estimate_surv <- function(.data,country,cut_date=NULL,...){
 
 ##transform cuminc output to tibble  
 cuminc2tibble <- function(cuminc) {
-  lapply(cuminc,as_tibble) %>% bind_rows(.id='Event')
+  lapply(cuminc,as_tibble) %>% bind_rows(.id='Event') %>% mutate(Event = str_replace(Event,'^1 ',''))
 }
 
 

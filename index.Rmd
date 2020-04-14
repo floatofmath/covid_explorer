@@ -14,9 +14,9 @@ editor_options:
 source('R/setup.R')
 ```
 
-## Disclaimre
+## Disclaimer
 
-Please note the opinions that these reflect personal opinion. My remarks do not necessarily reflect the official view of AGES, BASG, EMA, or any associated working party or committee. 
+Please note analyses and intrepretations presented here, reflect my personal opinion and do not necessarily reflect the official view of AGES, BASG, EMA, or any associated working party or committee. 
 
 ## News
 
