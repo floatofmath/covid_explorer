@@ -12,6 +12,9 @@ library(spData)
 library(tmap)
 library(ggflags)
 source('R/functions.R')
+library(survival)
+library(cmprsk)
+library(gridExtra)
 
 ## data import
 if(dir.exists('./data/CSSE_COVID-19/')){#I locally clone the CSSE repository; if that's not available fetch the full files

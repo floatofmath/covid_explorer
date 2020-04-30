@@ -43,8 +43,10 @@ average_rsurv <- function(.data,prop=.3){
 }
 
 plot_rsurv <- function(.data){
-  .data %>% ggplot(aes(time,est,colour=Event)) + geom_path(aes(group=replicate),alpha=.01) + 
-    geom_path(aes(time,est,colour=Event),data=average_rsurv(.data),alpha=1) + theme_minimal()
+  .data %>% ggplot(aes(time,est,colour=Event)) + 
+    geom_path(aes(group=paste0(Event,replicate)),alpha=.1) + 
+    geom_path(aes(time,est,colour=Event),data=average_rsurv(.data),alpha=1) + 
+    theme_minimal()
 }
 
 ## transform aggregate case and event data to individual times
@@ -71,9 +73,13 @@ to_time <- function(.data){
                 naiveReR) %>% arrange(end))
 }
 
-exp_weights <- function(days,rate=.3){
-  ## we add a little bit to deal allow censoring on the same day
-  1-exp(-rate*days) + .01
+weights_exponential <- function(days,rate=.1){
+  pexp(days+1,rate)-pexp(days,rate) 
+}
+
+
+weights_gamma <- function(days,shape=5,rate=1/3,...){
+  pgamma(days+1,shape,...)-pgamma(days,shape,rate,...)
 }
 #plot(1:20,exp_weights(1:20,rate=.3),type='l')
 ## resample eventtimes times consistence with incidence
