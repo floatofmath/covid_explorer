@@ -1,0 +1,46 @@
+---
+title: "COVID-19 Austria"
+author: "DI Dr. Florian Klinglmueller"
+date: "4/1/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+## Started this file March 5
+#devtools::install_github('rensa/ggflags')
+
+knitr::opts_chunk$set(echo = FALSE,message=FALSE,warning=FALSE,fig.width = 12,fig.height=8)
+library(tidyverse)
+library(magrittr)
+library(lubridate)
+library(ggmap)
+library(sf)
+library(raster)
+library(dplyr)
+library(spData)
+#library(spDataLarge)
+library(tmap)
+library(ggflags)
+
+```
+
+
+## R Markdown
+
+
+```{r data import}
+allgemein <- read_delim("data/coronaDAT/ts/allgemein.csv", 
+    ";", escape_double = FALSE, col_types = cols(date = col_datetime(format = "%Y-%m-%d %H:%M:%S")), 
+    trim_ws = TRUE)
+allgemein %>% ggplot(aes(date,erkrankungen))+geom_path()
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
